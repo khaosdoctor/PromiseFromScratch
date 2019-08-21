@@ -18,21 +18,24 @@ export class TypePromise {
     this.doResolve(executor, this.resolve, this.reject)
   }
 
+  private getHandlerType (type: ReturnType, done: boolean, onFulfilled: ResolveFunction, onRejected: RejectFunction) {
+    return (value: any) => {
+      if (done) return
+      done = true
+      return { error: onRejected, success: onFulfilled }[type](value)
+    }
+  }
+
+  /**
+   * Takes a potentially problematic resolver function and make sure the resolvers for onFulfilled and onRejected are only called once.
+   * @param resolverFn {Function} resolverFn A resolver function which is not trusted
+   * @param onFulfilled {Function} onFulfilled The function to be called when fulfilled
+   * @param onRejected {Function} onRejected The function to be called when rejected
+   */
   private doResolve (resolverFn: ExecutorFunction, onFulfilled: ResolveFunction, onRejected: RejectFunction) {
     let done = false
     try {
-      const handleValues = (type: ReturnType) => {
-        return (value: any) => {
-          if (done) return
-          done = true
-          return {
-            error: onRejected,
-            success: onFulfilled
-          }[type](value)
-        }
-      }
-
-      resolverFn(handleValues(ReturnType.SUCCESS), handleValues(ReturnType.ERROR))
+      resolverFn(this.getHandlerType(ReturnType.SUCCESS, done, onFulfilled, onRejected), this.getHandlerType(ReturnType.ERROR, done, onFulfilled, onRejected))
     } catch (error) {
       if (done) return
       done = true
@@ -53,11 +56,13 @@ export class TypePromise {
   private fulfill (value: any) {
     this.state = PromiseStates.FULFILLED
     this.value = value
-    this.thenHandlers.forEach(this.executeHandler)
-    this.thenHandlers = []
+    this.executeAllHandlers()
     this.finalFunction()
   }
 
+  /**
+   * Check if a value is a Promise, if it is, extract the `then` method and return
+   */
   private getThen (value: Thennable) {
     const t = typeof value
     if (value && (t === 'object' || t === 'function')) {
@@ -70,9 +75,13 @@ export class TypePromise {
   private reject (reason: any) {
     this.state = PromiseStates.REJECTED
     this.value = reason
+    this.executeAllHandlers()
+    this.finalFunction()
+  }
+
+  private executeAllHandlers () {
     this.thenHandlers.forEach(this.executeHandler)
     this.thenHandlers = []
-    this.finalFunction()
   }
 
   private executeHandler (handler: HandlerFunction) {
@@ -115,51 +124,15 @@ export class TypePromise {
   }
 
   private done (onFulfilled?: ResolveFunction, onRejected?: Nullable<RejectFunction>) {
-    setTimeout(() => {
+    process.nextTick(() => {
       this.executeHandler({
         onFulfilled,
         onRejected
       })
-    }, 0)
+    })
   }
 
   finally (finalFunction: Function) {
     if (typeof finalFunction === 'function') this.finalFunction = finalFunction
   }
 }
-
-/* EXAMPLE */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function foo (param: any) {
-  return new TypePromise((resolve, reject) => {
-    if (Math.random() > 0.5) return setTimeout(resolve, 1000, param)
-    return setTimeout(reject, 1000, 'error')
-  })
-}
-
-(() => {
-  foo(5)
-    .then((value) => console.log(value))
-    .catch((error) => console.error(error))
-    .finally(() => console.log('sempre retorna'))
-})()
